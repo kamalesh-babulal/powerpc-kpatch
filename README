@@ -1,0 +1,11 @@
+Most of the code is adopted from:
+commit 4feb144e9875774846514d751c18540036fdecb8
+Author: Josh Poimboeuf <jpoimboe@redhat.com>
+Date:   Mon Jan 14 21:46:38 2013 -0600
+
+    It's alive...
+
+    The end-to-end patching works.  From object analysis to generation to
+    runtime patching.  It's still missing the scripting piece that will only
+    take a patch and kernel source dir as input.
+
