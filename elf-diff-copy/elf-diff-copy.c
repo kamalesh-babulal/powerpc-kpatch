@@ -139,6 +139,23 @@ void check_elf_header(GElf_Ehdr *eh1, GElf_Ehdr *eh2)
 	log_ok("%s\t[PASSED]\n", "Elf Header compare");
 }
 
+void check_for_program_header()
+{
+	size_t phnum1, phnum2;
+
+	if (elf_getphdrnum(elf1, &phnum1))
+		ELF_ERROR(elf1, "elf_getphdrnum");
+	log_ok("%s %s\t[PASSED]\n", "Get Program Header for ", args.args[0]);
+
+	if (elf_getphdrnum(elf2, &phnum2))
+		ELF_ERROR(elf2, "elf_getphdrnum");
+	log_ok("%s %s\t[PASSED]\n", "Get Program Header for ", args.args[1]);
+
+	if (phnum1 || phnum2)
+		DIFF_FATAL("program header counts are nonzero");
+	log_d("%s\t[PASSED]\n", "no program headers");
+}
+
 int main(int argc, char *argv[])
 {
 	int fd1, fd2;
@@ -168,5 +185,11 @@ int main(int argc, char *argv[])
 	 * Compare the ELF headers of object files.
 	 */
 	check_elf_header(&eh1, &eh2);
+
+	/*
+	 * Check if any of the object file has program headers,
+	 * object files should not be having one.
+	 */
+	check_for_program_header();
 	return (0);
 }
