@@ -3,6 +3,7 @@
 #include <error.h>
 #include <fcntl.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <elfutils/elf-knowledge.h>
@@ -39,6 +40,12 @@
 
 #define ELF_ERROR(elf, str) \
 	error(1, 0, "%s:%d: " str " failed for '%s': %s", __FUNCTION__, __LINE__, elfname(elf), elf_errmsg(-1))
+
+#define DIFF_FATAL(format, ...) \
+({ \
+	printf("%s:%d: " format "\n", __FUNCTION__, __LINE__, ##__VA_ARGS__); \
+	error(2, 0, "unreconcilable difference"); \
+})
 
 /*
  * Structure definitions.
@@ -116,6 +123,22 @@ static Elf *elf_open(const char *name, int *fd)
 	return elf;
 }
 
+void check_elf_header(GElf_Ehdr *eh1, GElf_Ehdr *eh2)
+{
+	if (memcmp(eh1->e_ident, eh2->e_ident, EI_NIDENT)	||
+	    eh1->e_type		!= eh2->e_type			||
+	    eh1->e_machine	!= eh2->e_machine		||
+	    eh1->e_version	!= eh2->e_version		||
+	    eh1->e_entry	!= eh2->e_entry			||
+	    eh1->e_phoff	!= eh2->e_phoff			||
+	    eh1->e_flags	!= eh2->e_flags			||
+	    eh1->e_ehsize	!= eh2->e_ehsize		||
+	    eh1->e_phentsize	!= eh2->e_phentsize		||
+	    eh1->e_shentsize	!= eh2->e_shentsize)
+		DIFF_FATAL("ELF headers differ");
+	log_ok("%s\t[PASSED]\n", "Elf Header compare");
+}
+
 int main(int argc, char *argv[])
 {
 	int fd1, fd2;
@@ -140,5 +163,10 @@ int main(int argc, char *argv[])
 	if (!gelf_getehdr(elf2, &eh2))
 		ELF_ERROR(elf2, "gelf_getehdr");
 	log_ok("%s %s\t[PASSED]\n", "Get Elf Header for ", args.args[1]);
+
+	/*
+	 * Compare the ELF headers of object files.
+	 */
+	check_elf_header(&eh1, &eh2);
 	return (0);
 }
