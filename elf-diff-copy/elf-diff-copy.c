@@ -156,6 +156,15 @@ void check_for_program_header()
 	log_d("%s\t[PASSED]\n", "no program headers");
 }
 
+void about_elf(GElf_Ehdr *elf)
+{
+	if (elf->e_ident[EI_CLASS] == 2)
+		log_d ("Is a 64 bit object\n");
+	if (elf->e_ident[EI_DATA] == 1)
+		log_d ("Is a Little Endian\n");
+		log_d ("Is ABI version %d\n", elf->e_ident[EI_ABIVERSION]);
+}
+
 int main(int argc, char *argv[])
 {
 	int fd1, fd2;
@@ -191,5 +200,11 @@ int main(int argc, char *argv[])
 	 * object files should not be having one.
 	 */
 	check_for_program_header();
+
+	/*
+	 * Print information about elf.
+	 */
+	about_elf(&eh1);
+	about_elf(&eh2);
 	return (0);
 }
