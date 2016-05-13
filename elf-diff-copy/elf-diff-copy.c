@@ -48,6 +48,21 @@
 })
 
 /*
+ * List manipulation macros.
+ */
+#define list_add(head, new) \
+({ \
+	typeof(new) p = head; \
+	if (!head) \
+		head = new; \
+	else { \
+		while (p->next) \
+			p = p->next; \
+		p->next = new; \
+	} \
+})
+
+/*
  * Structure definitions.
  */
 struct arguments {
@@ -56,11 +71,23 @@ struct arguments {
 	char *outfile;
 };
 
+struct section {
+	struct section *next;
+	Elf_Scn *sec;
+	GElf_Shdr sh;
+	Elf_Data *data;
+	char *name;
+	struct section *twin, *twino;
+	size_t index;
+	int diff;
+};
+
 /*
  * Global declarations.
  */
 struct arguments args;
 Elf *elf1, *elf2, *elfv, *elfo;
+struct section *secs1, *secs2;
 
 error_t parse_opt(int key, char *arg, struct argp_state *state)
 {
@@ -165,6 +192,43 @@ void about_elf(GElf_Ehdr *elf)
 		log_d ("Is ABI version %d\n", elf->e_ident[EI_ABIVERSION]);
 }
 
+void init_section_list(Elf *elf, struct section **secs)
+{
+	Elf_Scn *scn;
+	struct section *sec;
+	size_t shstrndx;
+
+	if (elf_getshdrstrndx(elf, &shstrndx))
+		ELF_ERROR(elf, "elf_getshdrstrndx");
+
+	scn = NULL;
+
+	log_d("Sections found \n");
+	while ((scn = elf_nextscn(elf, scn))) {
+
+		sec = malloc(sizeof(*sec));
+		memset(sec, 0, sizeof(*sec));
+		sec->sec = scn;
+
+		if (!gelf_getshdr(scn, &sec->sh))
+			ELF_ERROR(elf, "gelf_getshdr");
+
+		sec->name = elf_strptr(elf, shstrndx, sec->sh.sh_name);
+		if (!sec->name)
+			ELF_ERROR(elf, "elf_strptr");
+
+		sec->data = NULL;
+		sec->data = elf_getdata(sec->sec, sec->data);
+		if (!sec->data)
+			ELF_ERROR(elf, "elf_getdata");
+		/* TODO: check for any remaining data? */
+
+		sec->index = elf_ndxscn(sec->sec);
+
+		list_add(*secs, sec);
+	}
+}
+
 int main(int argc, char *argv[])
 {
 	int fd1, fd2;
@@ -206,5 +270,12 @@ int main(int argc, char *argv[])
 	 */
 	about_elf(&eh1);
 	about_elf(&eh2);
+
+	/*
+	 * Read all the sections and add them
+         * into linked list.
+	 */
+	init_section_list(elf1, &secs1);
+	log_ok("%s %s\t[PASSED]\n", "Section list created for ", args.args[0]);
 	return (0);
 }
