@@ -11,12 +11,14 @@
 /*
  * Macros
  */
-#ifdef DEBUG
-#define log_d(format, ...) \
-        printf("%s:%d " format, __FUNCTION__, __LINE__, ##__VA_ARGS__);
-#else
-#define log_d(format, ...) { };
-#endif
+#define log_d(format, ...)	\
+({				\
+    \
+	if (args.debug)		\
+		printf("%s:%d " format, __FUNCTION__, __LINE__, ##__VA_ARGS__);				\
+	else			\
+	  do { }  while(0);	\
+})
 
 #define log_ok(format, ...) \
         printf("" format, ##__VA_ARGS__);
@@ -69,6 +71,7 @@ struct arguments {
 	char *args[2];
 	char *vmlinux;
 	char *outfile;
+	bool debug;
 };
 
 struct section {
@@ -100,6 +103,9 @@ error_t parse_opt(int key, char *arg, struct argp_state *state)
 		case 'o':
 			arguments->outfile = arg;
 			break;
+		case 'd':
+			arguments->debug = true;
+			break;
 		case ARGP_KEY_ARG:
 			if (state->arg_num > 1)
 				argp_usage(state);
@@ -120,6 +126,7 @@ error_t parse_opt(int key, char *arg, struct argp_state *state)
 static const struct argp_option options[] = {
 	{NULL, 'v', "file", 0, "original vmlinux"},
 	{NULL, 'o', "file", 0, "output file"},
+	{NULL, 'd',      0, 0, "debug"},
 	{},
 };
 

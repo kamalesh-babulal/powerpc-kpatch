@@ -8,7 +8,7 @@ SRC_PATH=/root/powerpc-kpatch
 
 all:
 	$(MAKE) -C elf-diff-copy
-	elf-diff-copy/elf-diff-copy $(OBJ_ORIG) $(OBJ_PATCHED) -v $(VMLINUX_ORIG) -o $(KMOD_DIR)/$(KPATCH_GENERATED)
+	elf-diff-copy/elf-diff-copy -d $(OBJ_ORIG) $(OBJ_PATCHED) -v $(VMLINUX_ORIG) -o $(KMOD_DIR)/$(KPATCH_GENERATED) 
 
 .PHONY: clean
 clean:
