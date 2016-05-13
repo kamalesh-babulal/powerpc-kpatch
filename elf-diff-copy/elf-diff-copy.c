@@ -13,7 +13,7 @@
  */
 #ifdef DEBUG
 #define log_d(format, ...) \
-        printf("" format, ##__VA_ARGS__);
+        printf("%s:%d " format, __FUNCTION__, __LINE__, ##__VA_ARGS__);
 #else
 #define log_d(format, ...) { };
 #endif
@@ -217,6 +217,7 @@ void init_section_list(Elf *elf, struct section **secs)
 		if (!sec->name)
 			ELF_ERROR(elf, "elf_strptr");
 
+		log_d("section %s\n", sec->name);
 		sec->data = NULL;
 		sec->data = elf_getdata(sec->sec, sec->data);
 		if (!sec->data)
