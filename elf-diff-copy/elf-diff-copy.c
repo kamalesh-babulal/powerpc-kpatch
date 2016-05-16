@@ -709,5 +709,18 @@ int main(int argc, char *argv[])
 	init_rela_list(elf1, secs1, syms1, &relas1);
 	log_pass("%s %s", "Relocation list created for ", args.args[0]);
 
+	/*
+	 * Repeat the same for patched ELF object file.
+	 */
+	log_d("\n\nProcessing patched object %s\n\n", args.args[1]);
+	init_section_list(elf2, &secs2);
+	log_pass("%s %s", "Section list created for ", args.args[1]);
+
+	init_symbol_list(elf2, secs2, &syms2);
+	log_pass("%s %s", "Symbol list created for ", args.args[1]);
+
+	init_rela_list(elf2, secs2, syms2, &relas2);
+	log_pass("%s %s", "Relocation list created for ", args.args[1]);
+
 	return (0);
 }
