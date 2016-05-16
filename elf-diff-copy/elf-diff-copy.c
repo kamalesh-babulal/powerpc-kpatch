@@ -9,6 +9,17 @@
 #include <elfutils/elf-knowledge.h>
 
 /*
+ * Color Coding
+ */
+#define ANSI_COLOR_RED     "\x1b[31m"
+#define ANSI_COLOR_GREEN   "\x1b[32m"
+#define ANSI_COLOR_YELLOW  "\x1b[33m"
+#define ANSI_COLOR_BLUE    "\x1b[34m"
+#define ANSI_COLOR_MAGENTA "\x1b[35m"
+#define ANSI_COLOR_CYAN    "\x1b[36m"
+#define ANSI_COLOR_RESET   "\x1b[0m"
+
+/*
  * Macros
  */
 #define log_d(format, ...)	\
@@ -20,8 +31,12 @@
 	  do { }  while(0);	\
 })
 
-#define log_ok(format, ...) \
-        printf("" format, ##__VA_ARGS__);
+#define log_pass(format, ...) \
+        printf("" format ANSI_COLOR_GREEN "\t[PASSED]\n" ANSI_COLOR_RESET , ##__VA_ARGS__);
+
+#define log_fail(format, ...) \
+        printf("" format ANSI_COLOR_RED "\t[FAILED]\n" ANSI_COLOR_RESET , ##__VA_ARGS__);
+
 #define ERROR(format, ...) \
 	error(1, 0, "%s: %d: " format, __FUNCTION__, __LINE__, ##__VA_ARGS__)
 
@@ -270,7 +285,7 @@ void check_elf_header(GElf_Ehdr *eh1, GElf_Ehdr *eh2)
 	    eh1->e_phentsize	!= eh2->e_phentsize		||
 	    eh1->e_shentsize	!= eh2->e_shentsize)
 		DIFF_FATAL("ELF headers differ");
-	log_ok("%s\t[PASSED]\n", "Elf Header compare");
+	log_pass("%s", "Elf Header compare");
 }
 
 void check_for_program_header()
@@ -279,11 +294,11 @@ void check_for_program_header()
 
 	if (elf_getphdrnum(elf1, &phnum1))
 		ELF_ERROR(elf1, "elf_getphdrnum");
-	log_ok("%s %s\t[PASSED]\n", "Get Program Header for ", args.args[0]);
+	log_pass("%s %s", "Get Program Header for ", args.args[0]);
 
 	if (elf_getphdrnum(elf2, &phnum2))
 		ELF_ERROR(elf2, "elf_getphdrnum");
-	log_ok("%s %s\t[PASSED]\n", "Get Program Header for ", args.args[1]);
+	log_pass("%s %s", "Get Program Header for ", args.args[1]);
 
 	if (phnum1 || phnum2)
 		DIFF_FATAL("program header counts are nonzero");
@@ -647,11 +662,11 @@ int main(int argc, char *argv[])
 	 */
 	if (!gelf_getehdr(elf1, &eh1))
 		ELF_ERROR(elf1, "gelf_getehdr");
-	log_ok("%s %s\t[PASSED]\n", "Get Elf Header for ", args.args[0]);
+	log_pass("%s %s", "Get Elf Header for ", args.args[0]);
 
 	if (!gelf_getehdr(elf2, &eh2))
 		ELF_ERROR(elf2, "gelf_getehdr");
-	log_ok("%s %s\t[PASSED]\n", "Get Elf Header for ", args.args[1]);
+	log_pass("%s %s", "Get Elf Header for ", args.args[1]);
 
 	/*
 	 * Compare the ELF headers of object files.
@@ -675,7 +690,7 @@ int main(int argc, char *argv[])
          * into linked list.
 	 */
 	init_section_list(elf1, &secs1);
-	log_ok("%s %s\t[PASSED]\n", "Section list created for ", args.args[0]);
+	log_pass("%s %s", "Section list created for ", args.args[0]);
 
 	/*
 	 * Read all the symbols from symbol table and
@@ -683,7 +698,7 @@ int main(int argc, char *argv[])
          * holding them. Add them to global link list.
 	 */
 	init_symbol_list(elf1, secs1, &syms1);
-	log_ok("%s %s\t[PASSED]\n", "Symbol list created for ", args.args[0]);
+	log_pass("%s %s", "Symbol list created for ", args.args[0]);
 
 	/*
 	 * Read the section link list and find all of the relocation section.
@@ -692,7 +707,7 @@ int main(int argc, char *argv[])
 	 * be applied.
 	 */
 	init_rela_list(elf1, secs1, syms1, &relas1);
-	log_ok("%s %s\t[PASSED]\n", "Relocation list created for ", args.args[0]);
+	log_pass("%s %s", "Relocation list created for ", args.args[0]);
 
 	return (0);
 }
