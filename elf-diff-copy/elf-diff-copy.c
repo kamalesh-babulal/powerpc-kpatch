@@ -85,12 +85,25 @@ struct section {
 	int diff;
 };
 
+struct symbol {
+	struct symbol *next;
+	GElf_Sym sym;
+	char *name;
+	struct symbol *twin, *twinv, *twino;
+	struct section *sec;
+	size_t index;
+	int type;
+	int bind;
+	int diff;
+};
+
 /*
  * Global declarations.
  */
 struct arguments args;
 Elf *elf1, *elf2, *elfv, *elfo;
 struct section *secs1, *secs2;
+struct symbol *syms1, *syms2;
 
 error_t parse_opt(int key, char *arg, struct argp_state *state)
 {
@@ -138,7 +151,45 @@ static struct argp argp = {
 };
 
 /*
+ * Character array's to print more human readable
+ * ELF information.
+ */
+char *symbol_type_char[] = {
+		"None",	"Object", "Function", "Section",  "File",
+		"Common", " ", " ", " ", " ", " ", " ", " ", " ",
+		" "};
+
+char *symbol_bind_char[] = {
+/* 0  */	"STB_LOCAL", "STB_GLOBAL", "STB_WEAK", "STB_NUM",
+/* 4  */	" ", " ", " ", " ", " ", " ",
+/* 10 */	"STB_LOOS || STB_GNU_UNIQUE", " ", "STB_HIOS",
+/* 13 */	"STB_LOPROC", " ", "STB_HIPROC"};
+
+/*
  * Helper functions
+ */
+struct section *find_section_by_index(struct section *secs, unsigned int index)
+{
+	struct section *sec;
+
+	for (sec = secs; sec && sec->index != index; sec = sec->next)
+		;
+
+	return sec;
+}
+
+struct section *find_section_by_name(struct section *secs, const char *name)
+{
+	struct section *sec;
+
+	for (sec = secs; sec && strcmp(sec->name, name); sec = sec->next)
+		;
+
+	return sec;
+}
+
+/*
+ * Core Functions.
  */
 static Elf *elf_open(const char *name, int *fd)
 {
@@ -237,6 +288,85 @@ void init_section_list(Elf *elf, struct section **secs)
 	}
 }
 
+void
+init_symbol_list(Elf *elf, struct section *secs, struct symbol **syms)
+{
+	struct section *sec;
+	struct symbol *sym = NULL, *last_sym = NULL;
+	int count, i;
+
+	sec = find_section_by_name(secs, ".symtab");
+	if (!sec)
+		ERROR("missing symbol table");
+
+	/*  Section size in bytes / Entry size if section holds table */
+	count = sec->sh.sh_size / sec->sh.sh_entsize;
+
+	for (i = 1; i < count; i++) { /* skip symbol 0 */
+
+		last_sym = sym;
+		sym = malloc(sizeof(*sym));
+		memset(sym, 0, sizeof(*sym));
+
+		sym->index = i;
+
+		if (!gelf_getsym(sec->data, i, &sym->sym))
+			ELF_ERROR(elf, "gelf_getsym");
+
+		/* The strings will be stores in .strtab section */
+		sym->name = elf_strptr(elf, sec->sh.sh_link,
+				       sym->sym.st_name);
+		if (!sym->name)
+			ELF_ERROR(elf, "elf_strptr");
+
+		sym->type = GELF_ST_TYPE(sym->sym.st_info);
+		sym->bind = GELF_ST_BIND(sym->sym.st_info);
+
+		switch (sym->type) {
+			case STT_NOTYPE: /* TODO: compare ABS symbols */
+			case STT_OBJECT:
+			case STT_FUNC:
+			case STT_SECTION:
+			case STT_FILE: /* TODO: FILE getting compared properly? */
+				break;
+			default:
+				ERROR("%s: unknown symbol type %d", sym->name,
+				      sym->type);
+		}
+
+		/*
+		 * ELF Extended Sections are employed to allow an ELF file to
+		 * contain more than 0xff00 (SHN_LORESERVE) section.
+		 */
+		if (sym->sym.st_shndx >= SHN_LORESERVE &&
+		    sym->sym.st_shndx <= SHN_HIRESERVE &&
+		    sym->sym.st_shndx != SHN_ABS)
+			ERROR("%s: I don't know how to handle reserved section "
+			      "index %d for symbol %s", elfname(elf),
+			      sym->sym.st_shndx, sym->name);
+
+		if (sym->sym.st_shndx != SHN_UNDEF)
+			sym->sec = find_section_by_index(secs,
+							 sym->sym.st_shndx);
+		else
+			sym->sec = NULL;
+
+		if (sym->type == STT_SECTION)
+			sym->name = sym->sec->name;
+
+		log_d("Symbol [%s] type [%s] bind [%s]\n",
+			sym->name, symbol_type_char[sym->type],
+			symbol_bind_char[sym->type]);
+
+		/* optimized list_add */
+		if (!*syms)
+			*syms = sym;
+		else
+			last_sym->next = sym;
+
+	}
+}
+
 int main(int argc, char *argv[])
 {
 	int fd1, fd2;
@@ -285,5 +415,14 @@ int main(int argc, char *argv[])
 	 */
 	init_section_list(elf1, &secs1);
 	log_ok("%s %s\t[PASSED]\n", "Section list created for ", args.args[0]);
+
+	/*
+	 * Read all the symbols from symbol table and
+	 * also identify their type, binding and section
+         * holding them. Add them to global link list.
+	 */
+	init_symbol_list(elf1, secs1, &syms1);
+	log_ok("%s %s\t[PASSED]\n", "Symbol list created for ", args.args[0]);
+
 	return (0);
 }
