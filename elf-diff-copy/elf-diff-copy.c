@@ -97,6 +97,19 @@ struct symbol {
 	int diff;
 };
 
+struct rela {
+	struct rela *next;
+	GElf_Rela rela;
+	struct rela *twin;
+	struct section *rela_sec, *dest_sec;
+	struct symbol *src_sym, *dest_sym;
+	/* TODO: get right signed and # of bits for all these vars */
+	long dest_off, src_off;
+	const char *src_str;
+	unsigned int type;
+	struct kpatch_rela *kpatch_rela;
+};
+
 /*
  * Global declarations.
  */
@@ -104,6 +117,7 @@ struct arguments args;
 Elf *elf1, *elf2, *elfv, *elfo;
 struct section *secs1, *secs2;
 struct symbol *syms1, *syms2;
+struct rela *relas1, *relas2;
 
 error_t parse_opt(int key, char *arg, struct argp_state *state)
 {
@@ -186,6 +200,41 @@ struct section *find_section_by_name(struct section *secs, const char *name)
 		;
 
 	return sec;
+}
+
+struct symbol *find_symbol_by_offset(struct symbol *syms, struct section *sec,
+				     int off, long *sym_off)
+{
+	struct symbol *sym;
+
+	for (sym = syms; sym; sym = sym->next)
+		if (sym->sec == sec && off >= sym->sym.st_value &&
+		    off < sym->sym.st_value + sym->sym.st_size) {
+			*sym_off = off - sym->sym.st_value;
+			return sym;
+		}
+
+	return NULL;
+}
+
+struct symbol *find_symbol_by_index(struct symbol *syms, size_t index)
+{
+	struct symbol *sym;
+
+	for (sym = syms; sym && sym->index != index; sym = sym->next)
+		;
+
+	return sym;
+}
+
+struct symbol *find_symbol_by_name(struct symbol *syms, const char *name)
+{
+	struct symbol *sym;
+
+	for (sym = syms; sym && strcmp(sym->name, name); sym = sym->next)
+		;
+
+	return sym;
 }
 
 /*
@@ -367,6 +416,218 @@ init_symbol_list(Elf *elf, struct section *secs, struct symbol **syms)
 	}
 }
 
+void init_rela_list(Elf *elf, struct section *secs, struct symbol *syms,
+		    struct rela **relas)
+{
+	struct section *rela_sec, *dest_sec;
+	int count, i;
+	unsigned int off, index;
+	struct rela *rela;
+
+	log_d("Relocation list :\n");
+
+	for (rela_sec = secs; rela_sec; rela_sec = rela_sec->next) {
+
+		if (rela_sec->sh.sh_type != SHT_RELA ||
+		    strstr(rela_sec->name, ".debug"))
+			continue;
+
+		/* Base or counter part of this relocation section */
+		dest_sec = find_section_by_name(secs, rela_sec->name + 5);
+		if (!dest_sec)
+			ERROR("can't find text section for rela %s",
+			      rela_sec->name);
+
+		/* Matching the number of entries */
+		count = rela_sec->sh.sh_size / rela_sec->sh.sh_entsize;
+		log_d("relocation [%s] entries [%d] it's mirror [%s]\n",
+				rela_sec->name, count,
+				dest_sec->name);
+/*
+Offset       Info         Type             Sym. Value       Sym. Name + Addend
+000000000000 045c000000fc R_PPC64_REL16_HA 0000000000000000 .TOC. + 0
+000000000004 045c000000fa R_PPC64_REL16_LO 0000000000000000 .TOC. + 4
+*/
+		for (i = 0; i < count; i++) {
+
+			rela = malloc(sizeof(*rela));
+			memset(rela, 0, sizeof(*rela));
+
+			if (!gelf_getrela(rela_sec->data, i, &rela->rela))
+				ELF_ERROR(elf, "gelf_getrela");
+
+			rela->rela_sec = rela_sec;
+			rela->dest_sec = dest_sec;
+
+			/*
+			 * This member (r_offset) gives the location at which to apply the
+			 * relocation action. For a relocatable file, the value is the byte
+			 * offset from the beginning of the section to the storage unit
+			 * affected by the relocation.
+			 * Find the symbol in the dest_sec() a.k.a base section.
+			 */
+			off = rela->rela.r_offset;
+			rela->dest_sym = find_symbol_by_offset(syms, dest_sec,
+							       off,
+							       &rela->dest_off);
+
+			if (!rela->dest_sym) {
+				/*
+				 * This means there is no symbol associated
+				 * with the address in the destination section.
+				 *
+				 * We ignore mcount relocations for now.
+				 * They'll need to be automatically regenerated
+				 * anyway...
+				 */
+				if (!strcmp(dest_sec->name, "__mcount_loc") ||
+				    !strcmp(dest_sec->name, ".toc")         ||
+				    !strcmp(dest_sec->name, "__jump_table")         ||
+				    !strcmp(dest_sec->name, "__bug_table")) {
+					free(rela);
+					continue;
+				} else
+					ERROR("%s:%d: missing symbol at offset %d",
+					      rela_sec->name, i, off);
+			}
+
+			/*
+			 * This member gives both the symbol table index with respect to
+			 * which the relocation must be made, and the type of relocation to
+			 * apply. For example, a call instruction's relocation entry would
+			 * hold the symbol table index of the function being called. If the
+			 * index is STN_UNDEF, the undefined symbol index, the relocation
+			 * uses 0 as the ``symbol value''. Relocation types are
+			 * processor-specific; descriptions of their behavior appear in
+			 * the processor supplement. When the text below refers to a
+			 * relocation entry's relocation type or symbol table index, it means
+			 * the result of applying ELF32_R_TYPE (or ELF64_R_TYPE) or
+			 * ELF32_R_SYM (or ELF64_R_SYM), respectively, to the entry's r_info
+			 * member.
+			 */
+			rela->type = GELF_R_TYPE(rela->rela.r_info);
+			index = GELF_R_SYM(rela->rela.r_info);
+
+			rela->src_sym = find_symbol_by_index(syms, index);
+			if (!rela->src_sym)
+				ERROR("%s:%d: missing symbol at index %d",
+				      rela_sec->name, i, index);
+
+			/*
+			 * This member specifies a constant addend used to compute the
+			 * value to be stored into the relocatable field.
+			 */
+			rela->src_off = rela->rela.r_addend;
+
+			/*
+			 * If the source symbol is actually a section, we need
+			 * to figure out the underlying function/object.
+			 */
+			if (rela->src_sym->type == STT_SECTION) {
+
+				const char *name = rela->src_sym->name;
+
+				if (!strcmp(name, ".text") ||
+				    !strcmp(name, ".init.text") ||
+				    !strncmp(name, ".data", 5) ||
+				    !strcmp(name, ".bss") ||
+				    !strcmp(name, ".toc")||
+				    !strcmp(name, ".rodata")) {
+
+					/* Source is a function/object */
+
+					/* TODO: too much indenting... */
+
+					/* TODO: In the case of R_X86_64_PC32,
+					 * for find_symbol_by_offset to be
+					 * accurate for finding the source
+					 * symbol, we will have to disassemble
+					 * the target function, find which
+					 * instruction includes the target
+					 * address, and then modify addend
+					 * appropriately.  e.g. .bss - 5.  and
+					 * _then_ call find_symbol_by_offset
+					 * with the correct offset.
+					 *
+					 * But for now, it should be ok because
+					 * we don't allow any changes (or
+					 * additions...) to global data anyway
+					 * and this only seems to affect .bss?
+					 *
+					 * but....we may need this for the
+					 * generation phase.  because when
+					 * translating relocations we need to
+					 * know what the source object is so we
+					 * can look up its address in the
+					 * vmlinux.
+					 * 
+					 * yeah.  so if the type is
+					 * R_X86_64_PC32 we need to do this.
+					 * examine the target location somehow,
+					 * and convert the addend
+					 * accordingly before calling
+					 * find_symbol_by_offset.
+					 *
+					 */
+#if 0
+					int addend_off = addend_offset(rela);
+
+
+					rela->src_sym = find_symbol_by_offset(
+							 syms,
+							 rela->src_sym->sec,
+							 rela->rela.r_addend + addend_off,
+							 &rela->src_off);
+
+					rela->src_off -= addend_off;
+					
+
+					if (!rela->src_sym)
+						ERROR("unknown reloc src "
+						      "symbol %s+%lx", name,
+						      rela->rela.r_addend);
+
+					/*
+					printf("reloc: %s+%lx -> %s+%x\n",
+					       name, rela->rela.r_addend,
+					       rela->src_sym->name,
+					       rela->src_off);
+					*/
+#endif
+
+				} else if (!strncmp(name, ".rodata.str", 11) ||
+					   !strcmp(name, "__ksymtab_strings")) {
+					/* Source is a string */
+					Elf_Data *str_data = rela->src_sym->sec->data;
+
+					rela->src_str = str_data->d_buf +
+							rela->rela.r_addend;
+
+					rela->src_off = 0;
+
+					/*
+					printf("reloc: %s+%lx -> %s\n",
+					       name, rela->rela.r_addend,
+					       rela->src_str);
+					*/
+
+				} else
+					printf("\t\tdon't know how to handle "
+					       "relocation source %s %d\n",
+						name, count);
+			}
+
+
+/*			printf("rela: %s+0x%lx to %s+0x%x\n",
+			       rela->src_sym->name, rela->rela.r_addend,
+			       rela->dest_sym->name, rela->dest_off);*/
+
+			list_add(*relas, rela);
+		}
+		//break; //debugging purpose.
+	}
+}
+
 int main(int argc, char *argv[])
 {
 	int fd1, fd2;
@@ -423,6 +684,15 @@ int main(int argc, char *argv[])
 	 */
 	init_symbol_list(elf1, secs1, &syms1);
 	log_ok("%s %s\t[PASSED]\n", "Symbol list created for ", args.args[0]);
+
+	/*
+	 * Read the section link list and find all of the relocation section.
+	 * For every relocation entry in the relocation section, find its
+	 * corresponding destination/base entry. To which the relocation should
+	 * be applied.
+	 */
+	init_rela_list(elf1, secs1, syms1, &relas1);
+	log_ok("%s %s\t[PASSED]\n", "Relocation list created for ", args.args[0]);
 
 	return (0);
 }
